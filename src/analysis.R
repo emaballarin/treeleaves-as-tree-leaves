@@ -27,7 +27,7 @@ library(caret)
 # DATA IMPORT:
 leaves_dataset <- readr::read_delim(file = "../data/leaf.csv",
                                     delim = ",",
-                                    col_names = NULL,
+                                    col_names = FALSE,
                                     col_types = cols(X1 = "i",    # We explicitly type columns
                                                      X2 = "i",
                                                      X3 = "d",
@@ -74,6 +74,39 @@ leaves_dataset <- leaves_dataset %>% dplyr::select(-c("SpecimenNr"))    # We don
 #
 # |> OUTER K-FOLD CROSS-VALIDATION - MODEL VALIDATION <|
 #
+
+# RNG seeding
+#set.seed(3456)
+
+# Config
+outer_folds <- 5
+outer_repetitions <- 3
+
+#
+# SHUFFLE THE DATAFRAME HERE!
+# In case multiple repetitions are needed, DON'T USE MULTIFOLDS.
+# Just put everything in a loop and shuffle again.
+#
+
+# Draw
+outer_test_indexes <- createFolds(leaves_dataset$Species,    # Returns indexes, unshuffled
+                                  k = outer_folds)
+for (i in seq(1,outer_folds)) {
+    # Do something with the folds
+    # i.e. put everything else into the loop
+    # we know looping is bad practice in the context of R, but the alternative is code duplication.
+}
+
+# In general, the following works on ONE repetition...
+#outer_leaves_dataset_train <- leaves_dataset[outer_train_indexes,]
+#outer_leaves_dataset_test <- leaves_dataset[-outer_train_indexes,]
+# ... and then shuffle.
+# something has to be done for multiple repetitions:
+# - looping
+# (or)
+# - `purrr::map`s
+
+
 
 
 #
