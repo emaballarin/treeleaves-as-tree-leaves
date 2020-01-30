@@ -28,7 +28,8 @@ library(ipred)
 library(e1071)
 library(kernlab)
 library(nnet)
-library(obliqueRF)
+library(xgboost)
+#library(elmNN)    # Must be compiled from source manually (no CRAN!)
 
 
 #
@@ -97,7 +98,17 @@ leaves_dataset$Species <-
 
 # Global constants
 kfcv_repetitions <- 1
-kfcv_folds <- 5
+kfcv_folds <- 2
+
+#
+# SET ACCURACIES TO ZERO AT THE BEGINNING...
+#
+sdt_localacc <- 0.0
+sdtp_localacc <- 0.0
+sdtba_localacc <- 0.0
+svmrb_localacc <- 0.0
+rf_localacc <- 0.0
+#elm_localacc <- 0.0
 
 
 #
@@ -105,8 +116,8 @@ kfcv_folds <- 5
 #
 
 # Config
-outer_repetitions <- 1 #kfcv_repetitions
-outer_folds <- 2 #kfcv_folds
+outer_repetitions <- kfcv_repetitions
+outer_folds <- kfcv_folds
 
 # Loop over repetitions
 for (outer_rep in seq(1, outer_repetitions))
@@ -133,6 +144,13 @@ for (outer_rep in seq(1, outer_repetitions))
         # |> INNER K-FOLD CROSS-VALIDATION - HYPERPARAMETER TUNING <|
         #
 
+        # For every model, the test set is the same IN INNER CV...
+        xpassed <- test_set[2:15]
+        ytrue <- test_set[[1]]
+        ytrue <- factor(ytrue, levels = levels(leaves_dataset$Species))    # Even-out factor levels to the maximum
+        dflen <- length(ytrue)
+
+
         fitControl <- trainControl(method = "repeatedcv",
                                    number = kfcv_folds,
                                    repeats = kfcv_repetitions)
@@ -143,49 +161,81 @@ for (outer_rep in seq(1, outer_repetitions))
         # |> MODELS <|
         #
 
-        ## Simple decision tree
-        # sdtGrid <- expand.grid(maxdepth = (1:30))
-        # sdtfit <- train(Species ~ Eccentricity + AspectRatio + Elongation + Solidity + StochConvexity + IsopFactor + MaxIndDepth + Lobedness + AvgIntensity + AvgContrast + Smoothness + TrdMoment + Uniformity + Entropy,
-        #        data = training_set,
-        #        method = "rpart2",
-        #        trControl = fitControl,
-        #        tuneGrid = sdtGrid,
-        #        # Additional parameters
-        #        metric = "Accuracy",
-        #        minsplit = 2
-        #        )
+        # Simple decision tree
+        sdtGrid <- expand.grid(maxdepth = (1:30))
+        sdtfit <- train(Species ~ Eccentricity + AspectRatio + Elongation + Solidity + StochConvexity + IsopFactor + MaxIndDepth + Lobedness + AvgIntensity + AvgContrast + Smoothness + TrdMoment + Uniformity + Entropy,
+                        data = training_set,
+                        method = "rpart2",
+                        trControl = fitControl,
+                        tuneGrid = sdtGrid,
+                        # Additional parameters
+                        metric = "Accuracy",
+                        minsplit = 2
+        )
 
-        ## Simple decision tree, with pruning => INEFFECTIVE! :/
-        # sdtpGrid <- expand.grid(cp = (0:10)/200.0)
-        # sdtpfit <- train(Species ~ Eccentricity + AspectRatio + Elongation + Solidity + StochConvexity + IsopFactor + MaxIndDepth + Lobedness + AvgIntensity + AvgContrast + Smoothness + TrdMoment + Uniformity + Entropy,
-        #        data = training_set,
-        #        method = "rpart",
-        #        trControl = fitControl,
-        #        tuneGrid = sdtpGrid,
-        #        # Additional parameters
-        #        metric = "Accuracy",
-        #        minsplit = 2
-        #        )
+        rm(ypred)
+        ypred <- max.col(predict(sdtfit$finalModel, xpassed))    # <== Change to EACH MODEL!
+        #ypred <- factor(ypred, levels = levels(leaves_dataset$Species))
+        sdt_localacc <- (sdt_localacc + sum((ytrue == ypred)/dflen))         # <== Change to EACH MODEL!
+
+        print("<> DT <>")
+
+
+        # Simple decision tree, with pruning => INEFFECTIVE! :/
+        sdtpGrid <- expand.grid(cp = (0:10)/200.0)
+        sdtpfit <- train(Species ~ Eccentricity + AspectRatio + Elongation + Solidity + StochConvexity + IsopFactor + MaxIndDepth + Lobedness + AvgIntensity + AvgContrast + Smoothness + TrdMoment + Uniformity + Entropy,
+                         data = training_set,
+                         method = "rpart",
+                         trControl = fitControl,
+                         tuneGrid = sdtpGrid,
+                         # Additional parameters
+                         metric = "Accuracy",
+                         minsplit = 2
+        )
+
+        rm(ypred)
+        ypred <- max.col(predict(sdtpfit$finalModel, xpassed))    # <== Change to EACH MODEL!
+        #ypred <- factor(ypred, levels = levels(leaves_dataset$Species))
+        sdtp_localacc <- (sdtp_localacc + sum((ytrue == ypred)/dflen))         # <== Change to EACH MODEL!
+
+        print("<> DTP <>")
+
 
         # Simple decision tree, with bagging => NOT TUNABLE
-        # sdtbafit <- train(Species ~ Eccentricity + AspectRatio + Elongation + Solidity + StochConvexity + IsopFactor + MaxIndDepth + Lobedness + AvgIntensity + AvgContrast + Smoothness + TrdMoment + Uniformity + Entropy,
-        #        data = training_set,
-        #        method = "treebag",
-        #        trControl = fitControl,
-        #        metric = "Accuracy",
-        #        nbagg = 600,
-        #        minsplit = 2
-        #        )
+        sdtbafit <- train(Species ~ Eccentricity + AspectRatio + Elongation + Solidity + StochConvexity + IsopFactor + MaxIndDepth + Lobedness + AvgIntensity + AvgContrast + Smoothness + TrdMoment + Uniformity + Entropy,
+                          data = training_set,
+                          method = "treebag",
+                          trControl = fitControl,
+                          metric = "Accuracy",
+                          nbagg = 600,
+                          minsplit = 2
+        )
 
-        # # SVM with RBF
-        # svmrbGrid <- expand.grid(C = c(3.7, 3.725, 3.75, 3.775, 3.8), sigma = c(0.18673, 0.3, 0.305, 0.31, 0.315, 0.32))
-        # svmrbfit <- train(Species ~ Eccentricity + AspectRatio + Elongation + Solidity + StochConvexity + IsopFactor + MaxIndDepth + Lobedness + AvgIntensity + AvgContrast + Smoothness + TrdMoment + Uniformity + Entropy,
-        #        data = training_set,
-        #        method = "svmRadial",
-        #        trControl = fitControl,
-        #        tuneGrid = svmrbGrid,
-        #        metric = "Accuracy",
-        #        )
+        rm(ypred)
+        ypred <- predict(sdtbafit$finalModel, xpassed)    # <== Change to EACH MODEL!
+        ypred <- factor(ypred, levels = levels(leaves_dataset$Species))
+        sdtba_localacc <- (sdtba_localacc + sum((ytrue == ypred)/dflen))         # <== Change to EACH MODEL!
+
+        print("<> DTB <>")
+
+
+        # SVM with RBF
+        svmrbGrid <- expand.grid(C = c(3.7, 3.725, 3.75, 3.775, 3.8), sigma = c(0.18673, 0.3, 0.305, 0.31, 0.315, 0.32))
+        svmrbfit <- train(Species ~ Eccentricity + AspectRatio + Elongation + Solidity + StochConvexity + IsopFactor + MaxIndDepth + Lobedness + AvgIntensity + AvgContrast + Smoothness + TrdMoment + Uniformity + Entropy,
+                          data = training_set,
+                          method = "svmRadial",
+                          trControl = fitControl,
+                          tuneGrid = svmrbGrid,
+                          metric = "Accuracy",
+        )
+
+        rm(ypred)
+        ypred <- predict(svmrbfit$finalModel, xpassed)    # <== Change to EACH MODEL!
+        ypred <- factor(ypred, levels = levels(leaves_dataset$Species))
+        svmrb_localacc <- (svmrb_localacc + sum((ytrue == ypred)/dflen))         # <== Change to EACH MODEL!
+
+        print("<> SVMRB <>")
+
 
         # # Ridiculous neural network (i.e. with 1 HL only) -- Just for fun [Acc.: 0.7258308; Not worth it!]
         # nnetGrid <- expand.grid(size = c(30), decay = c(0.00005))
@@ -199,19 +249,27 @@ for (outer_rep in seq(1, outer_repetitions))
         #        MaxNWts = 3000
         #        )
 
-        # # Random Forest
-        # rfGrid <- expand.grid(mtry = 2:13)    # Usually 6~10
-        # rffit <- train(Species ~ Eccentricity + AspectRatio + Elongation + Solidity + StochConvexity + IsopFactor + MaxIndDepth + Lobedness + AvgIntensity + AvgContrast + Smoothness + TrdMoment + Uniformity + Entropy,
-        #                data = training_set,
-        #                method = "rf",
-        #                trControl = fitControl,
-        #                tuneGrid = rfGrid,
-        #                verbose = FALSE,
-        #                # Additional parameters
-        #                ntree = 1500,    # >= 1000 actually; after [Breiman, 1999]
-        #                minsplit = 2,
-        #                metric = "Accuracy"
-        #                )
+
+        # Random Forest
+        rfGrid <- expand.grid(mtry = c(4:13))    # Usually 6~10
+        rffit <- train(Species ~ Eccentricity + AspectRatio + Elongation + Solidity + StochConvexity + IsopFactor + MaxIndDepth + Lobedness + AvgIntensity + AvgContrast + Smoothness + TrdMoment + Uniformity + Entropy,
+                       data = training_set,
+                       method = "rf",
+                       trControl = fitControl,
+                       tuneGrid = rfGrid,
+                       verbose = FALSE,
+                       # Additional parameters
+                       ntree = 1500,    # >= 1000 actually; after [Breiman, 1999]
+                       minsplit = 2,
+                       metric = "Accuracy"
+        )
+
+        rm(ypred)
+        ypred <- predict(rffit$finalModel, xpassed)    # <== Change to EACH MODEL!
+        ypred <- factor(ypred, levels = levels(leaves_dataset$Species))
+        rf_localacc <- (rf_localacc + sum((ytrue == ypred)/dflen))         # <== Change to EACH MODEL!
+
+        print("<> RF <>")
 
         #
         # |> RF Variable importance selection (in short: the more the better!) <|
@@ -222,52 +280,65 @@ for (outer_rep in seq(1, outer_repetitions))
         # rfvsRFE <- rfe(resampledotf_ds[2:15], resampledotf_ds[[1]], sizes = c(1:13), rfeControl = rfvsControl)
         # plot(rfvsRFE, type = c("g", "o"))
 
-
-
-
-
-
-
-###### OK #######
-
-        # An experiment...
-        # customRF <- list(type = "Classification", library = "randomForest", loop = NULL)
-        # customRF$parameters <- data.frame(parameter = c("mtry", "ntree", "nodesize"), class = rep("numeric", 3), label = c("mtry", "ntree", "nodesize")) # THIS!
-        # customRF$grid <- function(x, y, len = NULL, search = "grid") {}
-        # customRF$fit <- function(x, y, wts, param, lev, last, weights, classProbs, ...) {
-        #     randomForest::randomForest(x, y, mtry = param$mtry, ntree = param$ntree, ...) # THIS!
-        # }
-        # customRF$predict <- function(modelFit, newdata, preProc = NULL, submodels = NULL)
-        #     predict(modelFit, newdata)
-        # customRF$prob <- function(modelFit, newdata, preProc = NULL, submodels = NULL)
-        #     predict(modelFit, newdata, type = "prob")
-        # customRF$sort <- function(x) x[order(x[,1]),]
-        # customRF$levels <- function(x) x$classes
-
-        #rfGrid <- expand.grid(ntree = (1:8)*50)
-        # rffit <- train(Species ~ Eccentricity + AspectRatio + Elongation + Solidity + StochConvexity + IsopFactor + MaxIndDepth + Lobedness + AvgIntensity + AvgContrast + Smoothness + TrdMoment + Uniformity + Entropy,
+        # XGBoost
+        # xgbGrid <- expand.grid(max_depth = c(1:4)*2, nrounds = c(1:6)*50, eta = c(3:5)*0.1, subsample = c(5, 7.5, 10)*0.1, colsample_bytree = c(5.5, 6, 6.5, 7, 8, 10)*0.1, gamma = c(0.0), min_child_weight = c(1.0))
+        # xgbfit <- train(Species ~ Eccentricity + AspectRatio + Elongation + Solidity + StochConvexity + IsopFactor + MaxIndDepth + Lobedness + AvgIntensity + AvgContrast + Smoothness + TrdMoment + Uniformity + Entropy,
         #                data = training_set,
-        #                method = "rf",
+        #                method = "xgbTree",
         #                trControl = fitControl,
-        #                #tuneGrid = rfGrid,
+        #                tuneGrid = xgbGrid,
         #                verbose = FALSE,
-        #                # Additional parameters
-        #                ntree = 1000,
-        #                metric = "Accuracy"
+        #                metric = "Accuracy",
         #                )
 
-        # rfGrid <- expand.grid(mtry = c(5:7), ntree = c(200, 500, 700), nodesize = c(10:1))
-        # rffit <- train(Species ~ Eccentricity + AspectRatio + Elongation + Solidity + StochConvexity + IsopFactor + MaxIndDepth + Lobedness + AvgIntensity + AvgContrast + Smoothness + TrdMoment + Uniformity + Entropy,
+        # # Extreme Learning Machine
+        # elmGrid <- expand.grid(nhid = c(30:39), actfun = c("sin", "radbas", "purelin", "tansig"))    # nhid >= 40 causes problems due to buggy implementation :/
+        # elmfit <- train(Species ~ Eccentricity + AspectRatio + Elongation + Solidity + StochConvexity + IsopFactor + MaxIndDepth + Lobedness + AvgIntensity + AvgContrast + Smoothness + TrdMoment + Uniformity + Entropy,
         #                data = training_set,
-        #                method = customRF,
+        #                method = "elm",
         #                trControl = fitControl,
-        #                tuneGrid = rfGrid,
+        #                tuneGrid = elmGrid,
         #                verbose = FALSE,
-        #                # Additional parameters
-        #                metric = "Accuracy"
+        #                metric = "Accuracy",
         #                )
+        # rm(ypred)
+        # ypred <- max.col(predict(elmfit$finalModel, xpassed))    # <== Change to EACH MODEL!
+        # elm_localacc <- (elm_localacc + sum((ytrue == ypred)/dflen))         # <== Change to EACH MODEL!
+        #
+        # print("<> ELM <>")
+
+
+        # PRINT
+        print("   ")
+        print("---")
+        print("END OF CURRENT ITERATION - OUTER:")
+        print(outer_rep)
+        print("END OF CURRENT ITERATION - INNER:")
+        print(fold)
+        print("---")
+        print("   ")
+
     }
+    # PRINT
+    print("   ")
+    print("~~~")
+    print("|> |> END OF CURRENT ITERATION - OUTER: <| <|")
+    print(outer_rep)
+    print("~~~")
+    print("   ")
 }
+
+#
+# COMPUTE AVERAGES...
+#
+sdt_localacc <- (sdt_localacc / (outer_repetitions*outer_folds))
+sdtp_localacc <- (sdtp_localacc / (outer_repetitions*outer_folds))
+sdtba_localacc <- (sdtba_localacc / (outer_repetitions*outer_folds))
+svmrb_localacc <- (svmrb_localacc / (outer_repetitions*outer_folds))
+rf_localacc <- (rf_localacc / (outer_repetitions*outer_folds))
+#elm_localacc <- (elm_localacc / (outer_repetitions*outer_folds))
+
+
 
 
 #
